@@ -1,6 +1,6 @@
 # Discord Music Bot
 
-![Discord](https://img.shields.io/discord/your-guild-id?label=Discord&logo=discord)
+// ![Discord](https://img.shields.io/discord/your-guild-id?label=Discord&logo=discord)
 
 ## Описание
 
@@ -21,4 +21,20 @@
 1. **Клонируйте репозиторий**:
    ```bash
    git clone https://github.com/your-username/your-bot-repo.git
-
+   
+### Шаг 3: Настройка проекта
+1. Перейдите в папку с проектом:
+   - cd your-bot-repo
+2. Установите зависимости:
+   - npm install
+### Шаг 4: Настройка конфигурационного файла
+1. Создайте файл config.json в корневой папке проекта и заполните его следующими параметрами:
+{
+  "token": "ВАШ_ТОКЕН",
+  "clientId": "ВАШ_CLIENT_ID",
+  "guildIds": ["ID_СЕРВЕРА_1", "ID_СЕРВЕРА_2"],
+  "ownerId": "ID_ВЛАДЕЛЬЦА"
+}
+### Шаг 5: Запуск бота
+2. Запустите бота:
+   - node bot.js
