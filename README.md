@@ -75,7 +75,7 @@
    cd discord-music-bot
 2. Установите зависимости:
    ```bash
-   npm install
+   npm install discord.js @discordjs/builders @discordjs/voice ytdl-core
 
 ### Шаг 4: Настройка конфигурационного файла
 
