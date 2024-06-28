@@ -2,7 +2,7 @@ const { Client, GatewayIntentBits, REST, Routes, ActivityType } = require('disco
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, generateDependencyReport, VoiceConnectionStatus } = require('@discordjs/voice');
 const { SlashCommandBuilder } = require('@discordjs/builders');
 const ytdl = require('ytdl-core');
-const { token, clientId, guildId, ownerId, guildIds } = require('./config.json');
+const { token, clientId, ownerId, guildIds } = require('./config.json');
 const fs = require('fs');
 const path = require('path');
 
@@ -44,6 +44,13 @@ const commands = [
         .setName('remove')
         .setDescription('Удаляет песню из очереди по номеру')
         .addIntegerOption(option => option.setName('index').setDescription('Номер песни в очереди').setRequired(true)),
+    new SlashCommandBuilder()
+        .setName('loop')
+        .setDescription('Включает или выключает циклическое воспроизведение')
+        .addStringOption(option => option.setName('mode').setDescription('Один из вариантов: single, queue, off').setRequired(true)),
+    new SlashCommandBuilder()
+        .setName('np')
+        .setDescription('Показывает текущую воспроизводимую песню'),
 ].map(command => command.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(token);
@@ -74,15 +81,15 @@ client.once('ready', async () => {
         await client.user.setAvatar('./avatar.png');
 
         // Установка баннера
-        //client.user.setBanner('./doc.gif')
-        //    .then(async user => {
-        //        console.log(New banner set!);
-        //        const owner = await client.users.fetch(ownerId);
-        //        if (owner) {
-        //            await owner.send(Установлен новый баннер для бота: ${user.bannerURL()});
-        //       }
-        //   })
-        //   .catch(console.error);
+        client.user.setBanner('./doc.gif')
+            .then(async user => {
+                console.log('New banner set!');
+                const owner = await client.users.fetch(ownerId);
+                if (owner) {
+                    await owner.send(`Установлен новый баннер для бота: ${user.bannerURL()}`);
+                }
+            })
+            .catch(console.error);
 
         // Установка статуса активности
         client.user.setActivity('discord.js', { type: ActivityType.Watching });
@@ -93,12 +100,9 @@ client.once('ready', async () => {
             status: 'online'
         });
 
-       
     } catch (error) {
         console.error('Ошибка установки активности бота:', error);
     }
-
-
 
     // Отправка уведомления о перезагрузке
     const owner = await client.users.fetch(ownerId);
@@ -133,6 +137,12 @@ client.on('interactionCreate', async interaction => {
             break;
         case 'remove':
             await remove(interaction, serverQueue);
+            break;
+        case 'loop':
+            await loop(interaction, serverQueue);
+            break;
+        case 'np':
+            await nowPlaying(interaction, serverQueue);
             break;
         default:
             interaction.reply('Неизвестная команда!');
@@ -229,175 +239,84 @@ function stop(interaction, serverQueue) {
     if (!serverQueue) return interaction.reply('Очередь пуста!');
     serverQueue.songs = [];
     serverQueue.player.stop();
-    if (serverQueue.connection) {
-        serverQueue.connection.destroy();
-    }
+    serverQueue.connection.destroy();
     queue.delete(interaction.guild.id);
-    return interaction.reply('Музыка остановлена и бот покинул канал!');
+    return interaction.reply('Музыка остановлена и очередь очищена.');
 }
 
 function pause(interaction, serverQueue) {
     if (!serverQueue) return interaction.reply('Очередь пуста!');
     serverQueue.player.pause();
-    resetIdleTimer(serverQueue);
-    return interaction.reply('Музыка приостановлена!');
+    return interaction.reply('Музыка приостановлена.');
 }
 
 function resume(interaction, serverQueue) {
     if (!serverQueue) return interaction.reply('Очередь пуста!');
     serverQueue.player.unpause();
-    resetIdleTimer(serverQueue);
-    return interaction.reply('Музыка возобновлена!');
+    return interaction.reply('Музыка возобновлена.');
 }
 
 function showQueue(interaction, serverQueue) {
-    if (!serverQueue || !serverQueue.songs.length) return interaction.reply('Очередь пуста!');
-    const queueString = serverQueue.songs.map((song, index) => `${index + 1}. ${song.title}`).join('\n');
-    return interaction.reply(`Текущая очередь:\n${queueString}`);
+    if (!serverQueue || serverQueue.songs.length === 0) return interaction.reply('Очередь пуста!');
+    const currentQueue = serverQueue.songs.map((song, index) => `${index + 1}. ${song.title}`);
+    return interaction.reply(`**Текущая очередь:**\n${currentQueue.join('\n')}`);
 }
 
 function remove(interaction, serverQueue) {
+    if (!serverQueue || serverQueue.songs.length === 0) return interaction.reply('Очередь пуста!');
     const index = interaction.options.getInteger('index') - 1;
-    if (!serverQueue || !serverQueue.songs.length) return interaction.reply('Очередь пуста!');
-    if (index < 0 || index >= serverQueue.songs.length) return interaction.reply('Неверный номер песни.');
-    const removedSong = serverQueue.songs.splice(index, 1);
-    return interaction.reply(`**${removedSong[0].title}** была удалена из очереди!`);
+    if (index < 0 || index >= serverQueue.songs.length) {
+        return interaction.reply('Укажите действительный номер песни в очереди для удаления.');
+    }
+    const removed = serverQueue.songs.splice(index, 1);
+    return interaction.reply(`**${removed[0].title}** успешно удалена из очереди.`);
 }
 
-function play(guild, song) {
+function loop(interaction, serverQueue) {
+    if (!serverQueue || serverQueue.songs.length === 0) return interaction.reply('Очередь пуста!');
+    const mode = interaction.options.getString('mode').toLowerCase();
+    if (mode !== 'single' && mode !== 'queue' && mode !== 'off') {
+        return interaction.reply('Укажите действительный режим для циклического воспроизведения: single, queue или off.');
+    }
+    serverQueue.loop = mode;
+    return interaction.reply(`Циклическое воспроизведение установлено на режим: **${mode}**.`);
+}
+
+function nowPlaying(interaction, serverQueue) {
+    if (!serverQueue || serverQueue.songs.length === 0) return interaction.reply('Нет воспроизводимых песен.');
+    const nowPlaying = serverQueue.songs[0];
+    return interaction.reply(`Сейчас играет: **${nowPlaying.title}**`);
+}
+
+async function play(guild, song) {
     const serverQueue = queue.get(guild.id);
 
-    if (!serverQueue || !song) {
-        if (serverQueue && serverQueue.connection) {
-            serverQueue.connection.destroy();
-        }
+    if (!song) {
+        serverQueue.connection.destroy();
         queue.delete(guild.id);
-        console.error(`Невозможно воспроизвести песню. Очередь для сервера ${guild.id} не найдена или песня не указана.`);
         return;
     }
 
-    const stream = ytdl(song.url, { filter: 'audioonly' });
-    const resource = createAudioResource(stream);
+    const resource = createAudioResource(await ytdl(song.url), { inlineVolume: true });
+    serverQueue.player.play(resource);
 
-    if (serverQueue.connection) {
-        serverQueue.player.play(resource);
-        serverQueue.connection.subscribe(serverQueue.player);
-
-        serverQueue.player.on(AudioPlayerStatus.Idle, () => {
-            serverQueue.songs.shift();
-            if (serverQueue.songs.length > 0) {
-                play(guild, serverQueue.songs[0]);
-            } else {
-                resetIdleTimer(serverQueue);
-            }
-        });
-
-        serverQueue.player.on('error', error => {
-            console.error('Ошибка аудиоплеера:', error);
-            handleAudioPlayerError(guild.id, error);
-        });
-
-        resetIdleTimer(serverQueue);
-    } else {
-        console.error(`Соединение для сервера ${guild.id} не определено. Невозможно воспроизвести песню.`);
-        queue.delete(guild.id);
-    }
-}
-
-function resetIdleTimer(serverQueue) {
-    if (serverQueue.idleTimer) {
-        clearTimeout(serverQueue.idleTimer);
-    }
-    serverQueue.idleTimer = setTimeout(() => {
-        const voiceChannel = serverQueue.voiceChannel;
-        if (!voiceChannel || voiceChannel.members.size === 1) {
-            if (serverQueue.connection && serverQueue.connection.state.status !== VoiceConnectionStatus.Destroyed) {
-                serverQueue.connection.destroy();
-                console.log('Вышел из голосового канала из-за отсутствия активности.');
-            }
-            queue.delete(serverQueue.voiceChannel.guild.id);
-            console.log('Музыка остановлена, так как все пользователи покинули канал или отсутствует активность.');
-        }
-    }, 120000); // Тайм-аут 2 минуты
-}
-
-function handleAudioPlayerError(guildId, error) {
-    const serverQueue = queue.get(guildId);
-    if (!serverQueue) return;
-
-    console.error(`Ошибка аудиоплеера на сервере "${guildId}":`, error);
-
-    const owner = client.users.cache.get(ownerId);
-    if (owner) {
-        owner.send(`Ошибка аудиоплеера на сервере "${guildId}": ${error.message}`)
-            .catch(console.error);
-    }
-}
-
-client.on('messageCreate', async message => {
-    console.log('Сообщение получено:', message.content);
-
-    // Проверяем, является ли сообщение личным сообщением (DM)
-    if (message.channel.type === 'DM' || message.channel.type === 1) {
-
-        // Проверяем, отправлено ли сообщение от владельца бота
-        if (message.author.id === ownerId) {
-
-            // Проверяем содержимое сообщения для выполнения команды !reloadcommands
-            if (message.content === '!reloadcommands') {
-
-                // Выполняем регистрацию команд
-                await registerCommands();
-
-                // Отправляем ответное сообщение об успешной операции
-                await message.reply('Slash команды обновлены!');
-            } else {
-            }
+    serverQueue.player.on(AudioPlayerStatus.Idle, () => {
+        if (serverQueue.loop === 'single') {
+            play(guild, song);
+        } else if (serverQueue.loop === 'queue') {
+            serverQueue.songs.push(serverQueue.songs.shift());
+            play(guild, serverQueue.songs[0]);
         } else {
+            serverQueue.songs.shift();
+            play(guild, serverQueue.songs[0]);
         }
-    } else {
-    }
-});
+    });
 
-client.on('error', async (error, guildId) => {
-    console.error(`Бот столкнулся с ошибкой на сервере "${guildId.name}" (${guildId.id}):`, error);
-
-    const owner = await client.users.fetch(ownerId);
-    if (owner) {
-        await owner.send(`Бот столкнулся с ошибкой на сервере "${guildId.name}" (${guildId.id}): ${error.message}`);
-    }
-});
-
-process.on('unhandledRejection', async (reason, promise, guildId) => {
-    console.error(`Необработанное отклонение промиса на сервере "${guildId.name}" (${guildId.id}):`, reason);
-
-    const owner = await client.users.fetch(ownerId);
-    if (owner) {
-        await owner.send(`Необработанное отклонение промиса на сервере "${guildId.name}" (${guildId.id}): ${reason}`);
-    }
-});
-
-// Логирование в файл
-
-const logDirectory = path.resolve(__dirname, 'logs');
-if (!fs.existsSync(logDirectory)) {
-    fs.mkdirSync(logDirectory);
+    serverQueue.player.on('error', error => {
+        console.error('Возникла ошибка при воспроизведении:', error);
+        serverQueue.songs.shift();
+        play(guild, serverQueue.songs[0]);
+    });
 }
-
-const logFileName = () => {
-    const today = new Date();
-    return `${today.getFullYear()}-${today.getMonth() + 1}-${today.getDate()}.log`;
-};
-
-const logStream = fs.createWriteStream(path.join(logDirectory, logFileName()), { flags: 'a' });
-
-function logToFile(message) {
-    const timestamp = new Date().toISOString();
-    logStream.write(`[${timestamp}] ${message}\n`);
-}
-
-client.on('error', error => {
-    logToFile(`Произошла ошибка: ${error.message}`);
-});
 
 client.login(token);
