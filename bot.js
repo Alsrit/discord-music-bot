@@ -45,9 +45,9 @@ const commands = [
         .setDescription('Удаляет песню из очереди по номеру')
         .addIntegerOption(option => option.setName('index').setDescription('Номер песни в очереди').setRequired(true)),
     new SlashCommandBuilder()
-        .setName('volume')
-        .setDescription('Устанавливает громкость проигрывания музыки')
-        .addIntegerOption(option => option.setName('volume').setDescription('Громкость (от 1 до 100)').setRequired(true)),
+        .setName('loop')
+        .setDescription('Включает или выключает циклическое воспроизведение')
+        .addStringOption(option => option.setName('mode').setDescription('Один из вариантов: single, queue, off').setRequired(true)),
     new SlashCommandBuilder()
         .setName('np')
         .setDescription('Показывает текущую воспроизводимую песню'),
@@ -81,15 +81,7 @@ client.once('ready', async () => {
         await client.user.setAvatar('./avatar.png');
 
         // Установка баннера
-        client.user.setBanner('./doc.gif')
-            .then(async user => {
-                console.log('New banner set!');
-                const owner = await client.users.fetch(ownerId);
-                if (owner) {
-                    await owner.send(`Установлен новый баннер для бота: ${user.bannerURL()}`);
-                }
-            })
-            .catch(console.error);
+        client.user.setBanner('./doc.gif');
 
         // Установка статуса активности
         client.user.setActivity('discord.js', { type: ActivityType.Watching });
@@ -105,10 +97,10 @@ client.once('ready', async () => {
     }
 
     // Отправка уведомления о перезагрузке
-    const owner = await client.users.fetch(ownerId);
-    if (owner) {
-        await owner.send('Я был перезагружен.');
-    }
+   // const owner = await client.users.fetch(ownerId);
+   // if (owner) {
+   //     await owner.send('Я был перезагружен.');
+   // }
 });
 
 client.on('interactionCreate', async interaction => {
@@ -138,8 +130,8 @@ client.on('interactionCreate', async interaction => {
         case 'remove':
             await remove(interaction, serverQueue);
             break;
-        case 'volume':
-            await volume(interaction, serverQueue);
+        case 'loop':
+            await loop(interaction, serverQueue);
             break;
         case 'np':
             await nowPlaying(interaction, serverQueue);
@@ -275,30 +267,30 @@ function remove(interaction, serverQueue) {
 }
 
 
-function volume(interaction, serverQueue) {
-    const volume = interaction.options.getInteger('volume');
+
+function loop(interaction, serverQueue) {
+    const mode = interaction.options.getString('mode').toLowerCase();
 
     if (!serverQueue || !serverQueue.connection || !serverQueue.player) {
         return interaction.reply('Бот не находится в голосовом канале или не воспроизводит музыку.');
     }
 
-    if (volume < 0 || volume > 100) {
-        return interaction.reply('Громкость должна быть задана в диапазоне от 0 до 100.');
+    switch (mode) {
+        case 'single':
+            serverQueue.loop = 'single';
+            break;
+        case 'queue':
+            serverQueue.loop = 'queue';
+            break;
+        case 'off':
+            serverQueue.loop = null;
+            break;
+        default:
+            return interaction.reply('Неверный режим циклического воспроизведения. Допустимые значения: single, queue, off.');
     }
 
-    try {
-        if (serverQueue.player instanceof AudioPlayer) {
-            serverQueue.player.setVolume(volume / 100);
-            return interaction.reply(`Громкость установлена на ${volume}%`);
-        } else {
-            return interaction.reply('Не удалось установить громкость: неправильный тип аудиоплеера.');
-        }
-    } catch (error) {
-        console.error('Ошибка при установке громкости:', error);
-        return interaction.reply('Произошла ошибка при попытке установить громкость.');
-    }
+    return interaction.reply(`Режим циклического воспроизведения установлен на: ${mode}`);
 }
-
 
 function nowPlaying(interaction, serverQueue) {
     if (!serverQueue || !serverQueue.connection || !serverQueue.songs.length) {
