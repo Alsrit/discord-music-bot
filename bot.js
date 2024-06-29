@@ -305,7 +305,7 @@ function play(guild, song, retryCount = 0) {
         return;
     }
 
-    const stream = ytdl(song.url, { filter: 'audioonly' });
+    const stream = ytdl(song.url, { filter: 'audioonly', quality: 'highestaudio' });
     const resource = createAudioResource(stream);
     serverQueue.player.play(resource);
 
