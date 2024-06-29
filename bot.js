@@ -203,7 +203,9 @@ async function execute(interaction, serverQueue) {
             queueContruct.connection = connection;
 
             connection.on(VoiceConnectionStatus.Disconnected, () => {
-                clearTimeout(queueContruct.idleTimer);
+                if (queueContruct.idleTimer) {
+                    clearTimeout(queueContruct.idleTimer);
+                }
                 queue.delete(interaction.guild.id);
                 console.log('Вышел из голосового канала, так как соединение было разорвано.');
             });
@@ -255,10 +257,11 @@ function resume(interaction, serverQueue) {
 function showQueue(interaction, serverQueue) {
     if (!serverQueue || !serverQueue.songs.length) return interaction.reply('Очередь пуста!');
     const queueString = serverQueue.songs.map((song, index) => `${index + 1}. ${song.title}`).join('\n');
-    return interaction.reply(`Текущая очередь:\n${queueString}`);
+    return interaction.reply(`Текущая очередь песен:\n${queueString}`);
 }
 
 function remove(interaction, serverQueue) {
+    if (!serverQueue) return interaction.reply('Очередь пуста!');
     const index = interaction.options.getInteger('index') - 1;
     if (!serverQueue || !serverQueue.songs.length || index < 0 || index >= serverQueue.songs.length) {
         return interaction.reply('Некорректный номер песни.');
@@ -292,8 +295,12 @@ function play(guild, song, retryCount = 0) {
     const serverQueue = queue.get(guild.id);
 
     if (!song) {
-        clearTimeout(serverQueue.idleTimer);
-        serverQueue.connection.destroy();
+        if (serverQueue && serverQueue.idleTimer) {
+            clearTimeout(serverQueue.idleTimer);
+        }
+        if (serverQueue && serverQueue.connection) {
+            serverQueue.connection.destroy();
+        }
         queue.delete(guild.id);
         return;
     }
@@ -334,46 +341,16 @@ function play(guild, song, retryCount = 0) {
 }
 
 function resetIdleTimer(serverQueue) {
-    clearTimeout(serverQueue.idleTimer);
+    if (serverQueue && serverQueue.idleTimer) {
+        clearTimeout(serverQueue.idleTimer);
+    }
     serverQueue.idleTimer = setTimeout(() => {
         if (serverQueue.connection) {
             serverQueue.connection.destroy();
         }
         queue.delete(serverQueue.textChannel.guild.id);
         console.log('Вышел из голосового канала, так как никто не остался в канале.');
-    }, 600000);
+    }, 600000); // 10 минут
 }
-function handleAudioPlayerError(guildId, error) {
-    const serverQueue = queue.get(guildId);
-    if (!serverQueue) return;
-
-    console.error(`Ошибка аудиоплеера на сервере "${guildId}":`, error);
-
-    const owner = client.users.cache.get(ownerId);
-    if (owner) {
-        owner.send(`Ошибка аудиоплеера на сервере "${guildId}": ${error.message}`)
-            .catch(console.error);
-    }
-}
-
-
-
-client.on('error', async (error, guildId) => {
-    console.error(`Бот столкнулся с ошибкой на сервере "${guildId.name}" (${guildId.id}):`, error);
-
-    const owner = await client.users.fetch(ownerId);
-    if (owner) {
-        await owner.send(`Бот столкнулся с ошибкой на сервере "${guildId.name}" (${guildId.id}): ${error.message}`);
-    }
-});
-
-process.on('unhandledRejection', async (reason, promise, guildId) => {
-    console.error(`Необработанное отклонение промиса на сервере "${guildId.name}" (${guildId.id}):`, reason);
-
-    const owner = await client.users.fetch(ownerId);
-    if (owner) {
-        await owner.send(`Необработанное отклонение промиса на сервере "${guildId.name}" (${guildId.id}): ${reason}`);
-    }
-});
 
 client.login(token);
