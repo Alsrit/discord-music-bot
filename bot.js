@@ -1,12 +1,30 @@
 const { Client, GatewayIntentBits, REST, Routes, ActivityType } = require('discord.js');
-const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, generateDependencyReport, VoiceConnectionStatus } = require('@discordjs/voice');
+const { joinVoiceChannel, createAudioPlayer, createAudioResource, AudioPlayerStatus, VoiceConnectionStatus } = require('@discordjs/voice');
 const { SlashCommandBuilder } = require('@discordjs/builders');
 const ytdl = require('ytdl-core');
 const { token, clientId, ownerId, guildIds } = require('./config.json');
 const fs = require('fs');
 const path = require('path');
+const logFilePath = path.join(__dirname, 'bot.log'); // Путь к файлу лога
 
-console.log(generateDependencyReport());
+// Создаем или открываем файл лога для записи
+const logStream = fs.createWriteStream(logFilePath, { flags: 'a' });
+
+// Перенаправляем stdout и stderr в файл лога
+console.log = (...args) => {
+    logStream.write(`[${new Date().toLocaleString()}] [LOG] ${args.join(' ')}\n`);
+    process.stdout.write(...args);
+};
+
+console.error = (...args) => {
+    logStream.write(`[${new Date().toLocaleString()}] [ERROR] ${args.join(' ')}\n`);
+    process.stderr.write(...args);
+};
+
+
+process.on('exit', () => {
+    logStream.end(); // Закрываем поток записи
+});
 
 const client = new Client({
     intents: [
@@ -21,36 +39,15 @@ const client = new Client({
 const queue = new Map();
 
 const commands = [
-    new SlashCommandBuilder()
-        .setName('play')
-        .setDescription('Проигрывает музыку с YouTube')
-        .addStringOption(option => option.setName('url').setDescription('YouTube URL').setRequired(true)),
-    new SlashCommandBuilder()
-        .setName('skip')
-        .setDescription('Пропускает текущую песню'),
-    new SlashCommandBuilder()
-        .setName('stop')
-        .setDescription('Останавливает музыку и выходит из голосового канала'),
-    new SlashCommandBuilder()
-        .setName('pause')
-        .setDescription('Приостанавливает воспроизведение музыки'),
-    new SlashCommandBuilder()
-        .setName('resume')
-        .setDescription('Возобновляет воспроизведение музыки'),
-    new SlashCommandBuilder()
-        .setName('queue')
-        .setDescription('Показывает текущую очередь песен'),
-    new SlashCommandBuilder()
-        .setName('remove')
-        .setDescription('Удаляет песню из очереди по номеру')
-        .addIntegerOption(option => option.setName('index').setDescription('Номер песни в очереди').setRequired(true)),
-    new SlashCommandBuilder()
-        .setName('loop')
-        .setDescription('Включает или выключает циклическое воспроизведение')
-        .addStringOption(option => option.setName('mode').setDescription('Один из вариантов: single, queue, off').setRequired(true)),
-    new SlashCommandBuilder()
-        .setName('np')
-        .setDescription('Показывает текущую воспроизводимую песню'),
+    new SlashCommandBuilder().setName('play').setDescription('Проигрывает музыку с YouTube').addStringOption(option => option.setName('url').setDescription('YouTube URL').setRequired(true)),
+    new SlashCommandBuilder().setName('skip').setDescription('Пропускает текущую песню'),
+    new SlashCommandBuilder().setName('stop').setDescription('Останавливает музыку и выходит из голосового канала'),
+    new SlashCommandBuilder().setName('pause').setDescription('Приостанавливает воспроизведение музыки'),
+    new SlashCommandBuilder().setName('resume').setDescription('Возобновляет воспроизведение музыки'),
+    new SlashCommandBuilder().setName('queue').setDescription('Показывает текущую очередь песен'),
+    new SlashCommandBuilder().setName('remove').setDescription('Удаляет песню из очереди по номеру').addIntegerOption(option => option.setName('index').setDescription('Номер песни в очереди').setRequired(true)),
+    new SlashCommandBuilder().setName('loop').setDescription('Включает или выключает циклическое воспроизведение').addStringOption(option => option.setName('mode').setDescription('Один из вариантов: single, queue, off').setRequired(true)),
+    new SlashCommandBuilder().setName('np').setDescription('Показывает текущую воспроизводимую песню'),
 ].map(command => command.toJSON());
 
 const rest = new REST({ version: '10' }).setToken(token);
@@ -59,15 +56,12 @@ async function registerCommands() {
     try {
         console.log('Начата перезагрузка команд приложения (/).');
         for (const guildId of guildIds) {
-            await rest.put(
-                Routes.applicationGuildCommands(clientId, guildId),
-                { body: commands },
-            );
+            await rest.put(Routes.applicationGuildCommands(clientId, guildId), { body: commands });
             console.log(`Команды приложения (/) успешно перезагружены для сервера ${guildId}.`);
         }
         console.log('Все команды успешно перезагружены.');
     } catch (error) {
-        console.error(error);
+        console.error('Ошибка перезагрузки команд:', error);
     }
 }
 
@@ -77,30 +71,25 @@ client.once('ready', async () => {
     console.log(`Вошел в систему как ${client.user.tag}`);
 
     try {
-        // Установка аватара бота
+        // Проверяем, установлен ли уже баннер
+        if (!client.user.banner) {
+            await client.user.setBanner('./doc.gif');
+        }
+
+        // Установка аватара
         await client.user.setAvatar('./avatar.png');
 
-        // Установка баннера
-        client.user.setBanner('./doc.gif');
-
-        // Установка статуса активности
+        // Установка активности
         client.user.setActivity('discord.js', { type: ActivityType.Watching });
 
-        // Установка информации "Обо мне"
+        // Установка статуса
         client.user.setPresence({
             activities: [{ name: 'Пушистая Любовь', type: ActivityType.Playing }],
             status: 'online'
         });
-
     } catch (error) {
         console.error('Ошибка установки активности бота:', error);
     }
-
-    // Отправка уведомления о перезагрузке
-    // const owner = await client.users.fetch(ownerId);
-    // if (owner) {
-    //     await owner.send('Я был перезагружен.');
-    // }
 });
 
 client.on('interactionCreate', async interaction => {
@@ -108,53 +97,53 @@ client.on('interactionCreate', async interaction => {
 
     const serverQueue = queue.get(interaction.guild.id);
 
-    switch (interaction.commandName) {
-        case 'play':
-            await execute(interaction, serverQueue);
-            break;
-        case 'skip':
-            await skip(interaction, serverQueue);
-            break;
-        case 'stop':
-            await stop(interaction, serverQueue);
-            break;
-        case 'pause':
-            await pause(interaction, serverQueue);
-            break;
-        case 'resume':
-            await resume(interaction, serverQueue);
-            break;
-        case 'queue':
-            await showQueue(interaction, serverQueue);
-            break;
-        case 'remove':
-            await remove(interaction, serverQueue);
-            break;
-        case 'loop':
-            await loop(interaction, serverQueue);
-            break;
-        case 'np':
-            await nowPlaying(interaction, serverQueue);
-            break;
-        default:
-            interaction.reply('Неизвестная команда!');
+    try {
+        switch (interaction.commandName) {
+            case 'play':
+                await execute(interaction, serverQueue);
+                break;
+            case 'skip':
+                await skip(interaction, serverQueue);
+                break;
+            case 'stop':
+                await stop(interaction, serverQueue);
+                break;
+            case 'pause':
+                await pause(interaction, serverQueue);
+                break;
+            case 'resume':
+                await resume(interaction, serverQueue);
+                break;
+            case 'queue':
+                await showQueue(interaction, serverQueue);
+                break;
+            case 'remove':
+                await remove(interaction, serverQueue);
+                break;
+            case 'loop':
+                await loop(interaction, serverQueue);
+                break;
+            case 'np':
+                await nowPlaying(interaction, serverQueue);
+                break;
+            default:
+                interaction.reply('Неизвестная команда!');
+        }
+    } catch (error) {
+        console.error('Ошибка обработки команды:', error);
+        interaction.reply('Произошла ошибка при выполнении команды.');
     }
 });
 
 client.on('voiceStateUpdate', (oldState, newState) => {
     const serverQueue = queue.get(newState.guild.id);
-
     if (!serverQueue) return;
 
     const oldChannel = oldState.channel;
     const newChannel = newState.channel;
 
     if (oldChannel !== newChannel) {
-        if (newChannel && newChannel.members.size > 1) {
-            resetIdleTimer(serverQueue);
-        } else if (oldChannel && oldChannel.members.size === 1 && !newChannel) {
-            resetIdleTimer(serverQueue);
-        }
+        checkVoiceChannelActivity(serverQueue);
     }
 });
 
@@ -175,51 +164,53 @@ async function execute(interaction, serverQueue) {
         return interaction.reply('Укажите корректный YouTube URL для воспроизведения музыки с YouTube.');
     }
 
-    const songInfo = await ytdl.getInfo(url);
-    const song = {
-        title: songInfo.videoDetails.title,
-        url: songInfo.videoDetails.video_url,
-    };
+    try {
+        const songInfo = await ytdl.getInfo(url);
+        const song = { title: songInfo.videoDetails.title, url: songInfo.videoDetails.video_url };
 
-    if (!serverQueue) {
-        const queueContruct = {
-            textChannel: interaction.channel,
-            voiceChannel: voiceChannel,
-            connection: null,
-            songs: [],
-            player: createAudioPlayer(),
-            idleTimer: null,
-        };
+        if (!serverQueue) {
+            const queueContruct = {
+                textChannel: interaction.channel,
+                voiceChannel: voiceChannel,
+                connection: null,
+                songs: [],
+                player: createAudioPlayer(),
+                idleTimer: null,
+            };
 
-        queue.set(interaction.guild.id, queueContruct);
-        queueContruct.songs.push(song);
+            queue.set(interaction.guild.id, queueContruct);
+            queueContruct.songs.push(song);
 
-        try {
-            const connection = joinVoiceChannel({
-                channelId: voiceChannel.id,
-                guildId: voiceChannel.guild.id,
-                adapterCreator: voiceChannel.guild.voiceAdapterCreator,
-            });
-            queueContruct.connection = connection;
+            try {
+                const connection = joinVoiceChannel({
+                    channelId: voiceChannel.id,
+                    guildId: voiceChannel.guild.id,
+                    adapterCreator: voiceChannel.guild.voiceAdapterCreator,
+                });
+                queueContruct.connection = connection;
 
-            connection.on(VoiceConnectionStatus.Disconnected, () => {
-                if (queueContruct.idleTimer) {
-                    clearTimeout(queueContruct.idleTimer);
-                }
+                connection.on(VoiceConnectionStatus.Disconnected, () => {
+                    if (queueContruct.idleTimer) {
+                        clearTimeout(queueContruct.idleTimer);
+                    }
+                    queue.delete(interaction.guild.id);
+                    console.log('Вышел из голосового канала, так как соединение было разорвано.');
+                });
+
+                play(interaction.guild, queueContruct.songs[0]);
+                await interaction.reply(`Начинаем воспроизведение: **${song.title}**`);
+            } catch (err) {
+                console.log(err);
                 queue.delete(interaction.guild.id);
-                console.log('Вышел из голосового канала, так как соединение было разорвано.');
-            });
-
-            play(interaction.guild, queueContruct.songs[0]);
-            await interaction.reply(`Начинаем воспроизведение: **${song.title}**`);
-        } catch (err) {
-            console.log(err);
-            queue.delete(interaction.guild.id);
-            return interaction.reply('Ошибка при подключении к голосовому каналу.');
+                return interaction.reply('Ошибка при подключении к голосовому каналу.');
+            }
+        } else {
+            serverQueue.songs.push(song);
+            return interaction.reply(`**${song.title}** добавлена в очередь!`);
         }
-    } else {
-        serverQueue.songs.push(song);
-        return interaction.reply(`**${song.title}** добавлена в очередь!`);
+    } catch (error) {
+        console.error('Ошибка получения информации о песне:', error);
+        return interaction.reply('Ошибка получения информации о песне.');
     }
 }
 
@@ -294,6 +285,8 @@ function nowPlaying(interaction, serverQueue) {
 function play(guild, song, retryCount = 0) {
     const serverQueue = queue.get(guild.id);
 
+    checkVoiceChannelActivity(serverQueue);
+
     if (!song) {
         if (serverQueue && serverQueue.idleTimer) {
             clearTimeout(serverQueue.idleTimer);
@@ -358,17 +351,28 @@ function play(guild, song, retryCount = 0) {
     }
 }
 
+function checkVoiceChannelActivity(serverQueue) {
+    const voiceChannel = serverQueue.voiceChannel;
+    if (!voiceChannel || voiceChannel.members.size > 1) {
+        resetIdleTimer(serverQueue);
+    }
+}
+
 function resetIdleTimer(serverQueue) {
-    if (serverQueue && serverQueue.idleTimer) {
+    if (serverQueue.idleTimer) {
         clearTimeout(serverQueue.idleTimer);
     }
+
     serverQueue.idleTimer = setTimeout(() => {
-        if (serverQueue.connection) {
+        const voiceChannel = serverQueue.voiceChannel;
+        if (voiceChannel && voiceChannel.members.size === 1) {
             serverQueue.connection.destroy();
+            queue.delete(serverQueue.textChannel.guild.id);
+            console.log('Вышел из голосового канала, так как никто не остался в канале.');
         }
-        queue.delete(serverQueue.textChannel.guild.id);
-        console.log('Вышел из голосового канала, так как никто не остался в канале.');
-    }, 600000); // 10 минут
+    }, 120000); // 2 минуты
+
+    console.log(`Установлен таймер выхода из канала на 2 минуты для сервера ${serverQueue.textChannel.guild.id}`);
 }
 
 client.login(token);
