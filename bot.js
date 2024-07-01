@@ -305,27 +305,48 @@ function play(guild, song, retryCount = 0) {
         return;
     }
 
-    const stream = ytdl(song.url, { filter: 'audioonly', quality: 'highestaudio' });
-    const resource = createAudioResource(stream);
-    serverQueue.player.play(resource);
+    try {
+        const streamOptions = {
+            filter: 'audioonly',
+            quality: 'highestaudio', // Вы можете изменить качество здесь: 'highestaudio', 'lowestaudio', 'highestvideo', 'lowestvideo', 'audioandvideo'
+            highWaterMark: 1 << 25 // Устанавливаем высокий highWaterMark для улучшения буферизации
+        };
 
-    serverQueue.player.once(AudioPlayerStatus.Playing, () => {
-        console.log(`Началось воспроизведение: ${song.title}`);
-    });
+        const stream = ytdl(song.url, streamOptions);
+        const resource = createAudioResource(stream);
+        serverQueue.player.play(resource);
 
-    serverQueue.player.once(AudioPlayerStatus.Idle, () => {
-        if (serverQueue.loopMode === 'single') {
-            play(guild, serverQueue.songs[0]);
-        } else {
-            if (serverQueue.loopMode !== 'queue') {
-                serverQueue.songs.shift();
+        serverQueue.player.once(AudioPlayerStatus.Playing, () => {
+            console.log(`Началось воспроизведение: ${song.title}`);
+        });
+
+        serverQueue.player.once(AudioPlayerStatus.Idle, () => {
+            if (serverQueue.loopMode === 'single') {
+                play(guild, serverQueue.songs[0]);
+            } else {
+                if (serverQueue.loopMode !== 'queue') {
+                    serverQueue.songs.shift();
+                }
+                play(guild, serverQueue.songs[0]);
             }
-            play(guild, serverQueue.songs[0]);
-        }
-    });
+        });
 
-    serverQueue.player.on('error', error => {
-        console.error(`Ошибка воспроизведения: ${error.message}`);
+        serverQueue.player.on('error', error => {
+            console.error(`Ошибка воспроизведения: ${error.message}`);
+            if (retryCount < 3) {
+                console.log(`Повторная попытка воспроизведения: ${song.title} (${retryCount + 1})`);
+                play(guild, song, retryCount + 1);
+            } else {
+                console.log(`Пропущена песня: ${song.title} после 3 неудачных попыток`);
+                serverQueue.songs.shift();
+                play(guild, serverQueue.songs[0]);
+            }
+        });
+
+        serverQueue.connection.subscribe(serverQueue.player);
+        resetIdleTimer(serverQueue);
+    } catch (error) {
+        console.error(`Ошибка создания ресурса для воспроизведения: ${error.message}`);
         if (retryCount < 3) {
             console.log(`Повторная попытка воспроизведения: ${song.title} (${retryCount + 1})`);
             play(guild, song, retryCount + 1);
@@ -334,10 +355,7 @@ function play(guild, song, retryCount = 0) {
             serverQueue.songs.shift();
             play(guild, serverQueue.songs[0]);
         }
-    });
-
-    serverQueue.connection.subscribe(serverQueue.player);
-    resetIdleTimer(serverQueue);
+    }
 }
 
 function resetIdleTimer(serverQueue) {
