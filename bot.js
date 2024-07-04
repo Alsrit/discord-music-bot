@@ -21,9 +21,9 @@ console.error = (...args) => {
     process.stderr.write(...args);
 };
 
-
+// Закрываем поток записи при завершении процесса
 process.on('exit', () => {
-    logStream.end(); // Закрываем поток записи
+    logStream.end();
 });
 
 const client = new Client({
@@ -38,6 +38,7 @@ const client = new Client({
 
 const queue = new Map();
 
+// Определяем команды бота
 const commands = [
     new SlashCommandBuilder().setName('play').setDescription('Проигрывает музыку с YouTube').addStringOption(option => option.setName('url').setDescription('YouTube URL').setRequired(true)),
     new SlashCommandBuilder().setName('skip').setDescription('Пропускает текущую песню'),
@@ -52,6 +53,7 @@ const commands = [
 
 const rest = new REST({ version: '10' }).setToken(token);
 
+// Регистрация команд для серверов
 async function registerCommands() {
     try {
         console.log('Начата перезагрузка команд приложения (/).');
@@ -71,7 +73,7 @@ client.once('ready', async () => {
     console.log(`Вошел в систему как ${client.user.tag}`);
 
     try {
-        // Проверяем, установлен ли уже баннер
+        // Проверка и установка баннера, если он не установлен
         if (!client.user.banner) {
             await client.user.setBanner('./doc.gif');
         }
@@ -177,6 +179,9 @@ async function execute(interaction, serverQueue) {
                 player: createAudioPlayer(),
                 idleTimer: null,
             };
+
+            // Установка лимита слушателей
+            queueContruct.player.setMaxListeners(20);
 
             queue.set(interaction.guild.id, queueContruct);
             queueContruct.songs.push(song);
